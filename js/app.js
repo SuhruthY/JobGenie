@@ -19,6 +19,7 @@
 
   const loadingSection = document.getElementById('loadingSection');
   const loadingText = document.getElementById('loadingText');
+  const loadingProgress = document.getElementById('loadingProgress');
 
   const resultsSection = document.getElementById('resultsSection');
   const resultsGrid = document.getElementById('resultsGrid');
@@ -118,21 +119,39 @@
     const query = state.extractedKeywords.searchQuery;
     state.currentQuery = query;
 
-    // Show loading state
-    hide(keywordsSection);
+    // Button loading state
+    searchBtn.disabled = true;
+    searchBtn.innerHTML = `
+      <span class="btn-spinner"></span>
+      Searching…
+    `;
+
+    // Show loading section (keep keywords visible so user knows what we searched)
     hide(resultsSection);
     hide(emptySection);
     hide(errorSection);
-    loadingText.textContent = `Searching jobs for: "${query}"…`;
+    loadingText.textContent = `Searching for jobs matching: "${query}"`;
+    loadingProgress.textContent = 'Contacting Himalayas job search…';
     show(loadingSection);
 
+    // Scroll to loading so user sees progress
+    loadingSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
     try {
-      // Call Himalayas API via our Search module
+      // Progress updates so user knows it's still working
+      const progressTimers = [
+        setTimeout(() => { if (state.isSearching) loadingProgress.textContent = 'Receiving results…'; }, 4000),
+        setTimeout(() => { if (state.isSearching) { loadingProgress.textContent = 'Still waiting — job boards can be slow…'; } }, 10000),
+      ];
+
       const jobs = await Search.searchJobs(query);
+      // Clear progress timers
+      progressTimers.forEach(t => clearTimeout(t));
 
       state.jobs = jobs;
       state.isSearching = false;
       hide(loadingSection);
+      restoreSearchButton();
 
       if (jobs.length === 0) {
         emptyMessage.textContent = 'No active job listings found matching your resume. Try uploading a more detailed resume or different file.';
@@ -140,15 +159,41 @@
       } else {
         renderResults(jobs);
         show(resultsSection);
+        resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
     } catch (err) {
       console.error('Search error:', err);
+      // Clear progress timers
+      progressTimers.forEach(t => clearTimeout(t));
       state.isSearching = false;
       hide(loadingSection);
-      errorMessage.textContent = `Could not reach the job search service: ${err.message}`;
+      restoreSearchButton();
+
+      // Detect specific error types and give helpful messages
+      if (err.message && err.message.includes('fetch') || err.name === 'TypeError') {
+        errorMessage.innerHTML = `
+          <strong>Network error</strong> — couldn't reach the job search service.<br>
+          If you're opening this page from a local file, try using a local server instead,
+          or deploy to GitHub Pages as intended.
+        `;
+      } else if (err.message && err.message.includes('abort')) {
+        errorMessage.textContent = 'The request timed out. The job search service may be slow right now. Please try again.';
+      } else {
+        errorMessage.textContent = `Something went wrong: ${err.message}`;
+      }
       show(errorSection);
     }
+  }
+
+  function restoreSearchButton() {
+    searchBtn.disabled = false;
+    searchBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+      </svg>
+      Find Matching Jobs
+    `;
   }
 
   /* ─── Render Job Cards ───────────────────────────── */

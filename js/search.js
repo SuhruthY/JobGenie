@@ -14,9 +14,13 @@ const Search = (() => {
   // Maximum jobs we consider expired (in days from posted date)
   const MAX_JOB_AGE_DAYS = 60;
 
+  // Timeout for API calls (15 seconds)
+  const FETCH_TIMEOUT_MS = 15000;
+
   /**
    * Fetch jobs from Himalayas search API with keyword query.
    * Uses the search endpoint for keyword matching and sort by recent.
+   * Includes a timeout via AbortController.
    */
   async function fetchJobs(query, page = 1) {
     const params = new URLSearchParams({
@@ -25,15 +29,24 @@ const Search = (() => {
       page: page.toString()
     });
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
     const url = `${API_SEARCH}?${params}`;
-    const response = await fetch(url);
 
-    if (!response.ok) {
-      throw new Error(`Himalayas API returned ${response.status}: ${response.statusText}`);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+
+      if (!response.ok) {
+        throw new Error(`Himalayas API returned ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.jobs || [];
+
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    const data = await response.json();
-    return data.jobs || [];
   }
 
   /**
