@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { JobService } from './job.service';
 import { Job } from './job.interface';
 import { SearchBarComponent } from './search-bar/search-bar.component';
@@ -12,13 +12,12 @@ import { JobListComponent } from './job-list/job-list.component';
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   jobs: Job[] = [];
   allJobs: Job[] = [];
   filteredJobs: Job[] = [];
   loading = false;
   error = '';
-  initial = true;
   loadingText = 'Searching…';
   loadingProgress = '';
 
@@ -30,8 +29,28 @@ export class AppComponent {
 
   constructor(private jobService: JobService) {}
 
+  ngOnInit(): void {
+    this.loadInitialJobs();
+  }
+
+  private loadInitialJobs(): void {
+    this.loading = true;
+    this.loadingText = 'Loading latest jobs…';
+    this.loadingProgress = 'Gathering opportunities…';
+
+    this.jobService.fetchInitialJobs()
+      .then(jobs => {
+        this.loading = false;
+        this.allJobs = jobs;
+        this.applyFilters();
+      })
+      .catch(() => {
+        this.loading = false;
+        // Silent fail — user can still search
+      });
+  }
+
   onSearch(query: string): void {
-    this.initial = false;
     this.loading = true;
     this.error = '';
     this.jobs = [];

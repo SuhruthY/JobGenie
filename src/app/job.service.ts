@@ -1,8 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Job } from './job.interface';
 
-
-
 interface Provider {
   name: string;
   fetch: (query: string) => Promise<Job[]>;
@@ -13,25 +11,77 @@ export class JobService {
   private readonly FETCH_TIMEOUT_MS = 15000;
   private readonly MAX_JOB_AGE_DAYS = 60;
 
-  private readonly providers: Provider[] = [
+  private readonly searchProviders: Provider[] = [
     { name: 'himalayas', fetch: (q) => this.fetchHimalayas(q) },
     { name: 'remotive', fetch: (q) => this.fetchRemotive(q) },
     { name: 'remoteok', fetch: (q) => this.fetchRemoteOK(q) },
   ];
 
+  /* ─── Initial diversified feed ─────────────── */
+
+  async fetchInitialJobs(): Promise<Job[]> {
+    // Fetch from all providers without search terms for maximum diversity
+    const results = await Promise.allSettled([
+      this.fetchHimalayasBrowse(),
+      this.fetchRemotive(''),
+      this.fetchRemoteOK(''),
+    ]);
+
+    const all: Job[] = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled') all.push(...r.value);
+    }
+    const active = all.filter(j => !this.isExpired(j) && !this.isTooOld(j));
+    // Deduplicate by title+company
+    const seen = new Set<string>();
+    const deduped = active.filter(j => {
+      const key = `${j.title}|${j.companyName}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    // Shuffle to show diversity (not all from one provider)
+    return this.shuffle(this.sortJobs(this.enrichJobs(deduped), 'date')).slice(0, 40);
+  }
+
+  /* ─── Search with accumulation ─────────────── */
+
   async searchJobs(query: string): Promise<Job[]> {
     const errors: string[] = [];
-    for (const provider of this.providers) {
+    const all: Job[] = [];
+
+    for (const provider of this.searchProviders) {
       try {
         const raw = await provider.fetch(query);
-        const active = raw.filter(j => !this.isExpired(j) && !this.isTooOld(j));
-        return this.sortJobs(this.enrichJobs(active), 'date');
+        all.push(...raw);
       } catch (err: any) {
         console.warn(`[JobService] Provider "${provider.name}" failed:`, err.message);
         errors.push(`${provider.name}: ${err.message}`);
       }
     }
-    throw new Error(`All job search providers failed.\n${errors.join('\n')}`);
+
+    if (all.length === 0) {
+      if (errors.length === this.searchProviders.length) {
+        throw new Error(`All job search providers failed.\n${errors.join('\n')}`);
+      }
+      return [];
+    }
+
+    const active = all.filter(j => !this.isExpired(j) && !this.isTooOld(j));
+    const enriched = this.enrichJobs(active);
+
+    // Relevance filter: show jobs whose title/description mention at least one query term
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    if (terms.length > 0) {
+      const matching = enriched.filter(j => {
+        const text = `${j.title} ${j.description} ${j.companyName}`.toLowerCase();
+        return terms.some(t => text.includes(t));
+      });
+      // If we have matching results, use those; otherwise fall back to all results
+      if (matching.length > 0) return this.sortJobs(matching, 'date');
+    }
+
+    return this.sortJobs(enriched, 'date');
   }
 
   sortJobs(jobs: Job[], sortBy: string): Job[] {
@@ -63,6 +113,13 @@ export class JobService {
 
   /* ─── Provider: Himalayas ──────────────────── */
 
+  private async fetchHimalayasBrowse(): Promise<Job[]> {
+    const res = await this.fetchWithTimeout('https://himalayas.app/jobs/api');
+    if (!res.ok) throw new Error(`Himalayas browse API returned ${res.status}`);
+    const data = await res.json();
+    return (data.jobs || []).map((j: any) => this.normalizeHimalayas(j));
+  }
+
   private async fetchHimalayas(query: string): Promise<Job[]> {
     const params = new URLSearchParams({ q: query, sort: 'recent', page: '1' });
     const res = await this.fetchWithTimeout(`https://himalayas.app/jobs/api/search?${params}`);
@@ -93,8 +150,10 @@ export class JobService {
   /* ─── Provider: Remotive ───────────────────── */
 
   private async fetchRemotive(query: string): Promise<Job[]> {
-    const params = new URLSearchParams({ search: query });
-    const res = await this.fetchWithTimeout(`https://remotive.com/api/remote-jobs?${params}`);
+    const url = query
+      ? `https://remotive.com/api/remote-jobs?${new URLSearchParams({ search: query })}`
+      : 'https://remotive.com/api/remote-jobs';
+    const res = await this.fetchWithTimeout(url);
     if (!res.ok) throw new Error(`Remotive API returned ${res.status}`);
     const data = await res.json();
     return (data.jobs || []).map((j: any) => this.normalizeRemotive(j));
@@ -124,8 +183,8 @@ export class JobService {
   /* ─── Provider: RemoteOK ───────────────────── */
 
   private async fetchRemoteOK(query: string): Promise<Job[]> {
-    const params = new URLSearchParams({ keyword: query });
-    const res = await this.fetchWithTimeout(`https://remoteok.com/api?${params}`);
+    const params = query ? `?${new URLSearchParams({ keyword: query })}` : '';
+    const res = await this.fetchWithTimeout(`https://remoteok.com/api${params}`);
     if (!res.ok) throw new Error(`RemoteOK API returned ${res.status}`);
     const data = await res.json();
     if (!Array.isArray(data)) return [];
@@ -228,5 +287,14 @@ export class JobService {
     if (job.minSalary) return `From ${fmt(job.minSalary)}`;
     if (job.maxSalary) return `Up to ${fmt(job.maxSalary)}`;
     return null;
+  }
+
+  private shuffle(arr: Job[]): Job[] {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 }

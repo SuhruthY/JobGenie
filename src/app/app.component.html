@@ -16,7 +16,7 @@
   <div class="container">
     <app-search-bar (search)="onSearch($event)" />
 
-    @if (!initial && allJobs.length > 0) {
+    @if (allJobs.length > 0) {
       <app-filter-bar
         [sources]="sources"
         [activeSource]="activeSource"
@@ -30,7 +30,6 @@
       [jobs]="jobs"
       [loading]="loading"
       [error]="error"
-      [initial]="initial"
       [loadingText]="loadingText"
       [loadingProgress]="loadingProgress"
       (retry)="onRetry()"

@@ -24,7 +24,7 @@ import { JobCardComponent } from '../job-card/job-card.component';
         <p>{{ error }}</p>
         <button class="btn-retry" (click)="retry.emit()">Try Again</button>
       </div>
-    } @else if (jobs.length === 0 && !initial) {
+    } @else if (jobs.length === 0 && !loading) {
       <div class="state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
           <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
@@ -32,15 +32,7 @@ import { JobCardComponent } from '../job-card/job-card.component';
         <h3>No jobs found</h3>
         <p>{{ emptyText }}</p>
       </div>
-    } @else if (initial) {
-      <div class="state state--welcome">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="56" height="56">
-          <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
-        </svg>
-        <h3>Find your next job</h3>
-        <p>Search for a job title or keyword above to get started.</p>
-      </div>
-    } @else {
+    } @else if (jobs.length > 0) {
       <div class="toolbar">
         <div class="toolbar__info">
           <span class="toolbar__count">{{ totalCount }}</span> jobs found
@@ -69,8 +61,6 @@ import { JobCardComponent } from '../job-card/job-card.component';
     .state svg { color: #94A3B8; margin-bottom: 16px; }
     .state h3 { font-size: 18px; font-weight: 600; color: #0F172A; margin-bottom: 8px; }
     .state p { font-size: 14px; max-width: 400px; margin: 0 auto; }
-    .state--welcome svg { color: #4F46E5; }
-    .state--welcome h3 { font-size: 22px; color: #4F46E5; }
     .btn-retry {
       margin-top: 16px; padding: 10px 24px; background: #4F46E5; color: #fff;
       border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
@@ -93,7 +83,6 @@ export class JobListComponent {
   @Input() jobs: Job[] = [];
   @Input() loading = false;
   @Input() error = '';
-  @Input() initial = true;
   @Input() loadingText = 'Searching…';
   @Input() loadingProgress = '';
   @Input() emptyText = 'No matching jobs found. Try a different search term.';
