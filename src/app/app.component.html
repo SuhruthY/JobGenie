@@ -1,0 +1,45 @@
+<header class="header">
+  <div class="container">
+    <div class="header__inner">
+      <div class="header__logo">
+        <svg class="header__logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+        </svg>
+        <span class="header__logo-text">JobGenie</span>
+      </div>
+      <p class="header__tagline">Search for the latest jobs. Apply directly.</p>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <div class="container">
+    <app-search-bar (search)="onSearch($event)" />
+
+    @if (!initial && allJobs.length > 0) {
+      <app-filter-bar
+        [sources]="sources"
+        [activeSource]="activeSource"
+        [sortBy]="sortBy"
+        (sourceChange)="onSourceChange($event)"
+        (sortChange)="onSortChange($event)"
+      />
+    }
+
+    <app-job-list
+      [jobs]="jobs"
+      [loading]="loading"
+      [error]="error"
+      [initial]="initial"
+      [loadingText]="loadingText"
+      [loadingProgress]="loadingProgress"
+      (retry)="onRetry()"
+    />
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <p>Job data from <a href="https://himalayas.app" target="_blank" rel="noopener">Himalayas</a>, <a href="https://remotive.com" target="_blank" rel="noopener">Remotive</a>, and <a href="https://remoteok.com" target="_blank" rel="noopener">RemoteOK</a>.</p>
+  </div>
+</footer>
