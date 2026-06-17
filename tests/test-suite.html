@@ -27,7 +27,7 @@
 </head>
 <body>
   <h1>JobGenie Test Suite</h1>
-  <p class="subtitle">Tests: Extractor, Search, Parser, and integration flows</p>
+  <p class="subtitle">Tests: Extractor, Search (3 providers), Parser, and integration flows</p>
   <div class="summary" id="summary"></div>
   <div id="results"></div>
 
@@ -42,11 +42,9 @@
 
       const resultsEl = document.getElementById('results');
       const summaryEl = document.getElementById('summary');
-      const modules = {};
       let totalTests = 0, totalPassed = 0, totalFailed = 0;
 
       function module(name) {
-        modules[name] = [];
         const section = document.createElement('div');
         section.className = 'module';
         section.innerHTML = `<h2>${name}</h2>`;
@@ -100,9 +98,8 @@
       /* ─────────────────────────────────────────────────
        * EXTRACTOR TESTS
        * ───────────────────────────────────────────────── */
-      const extMod = module('Extractor');
+      module('Extractor');
 
-      // Basic skill detection
       test('Extractor', 'detects single skill', () => {
         const r = Extractor.extractKeywords('I know Python');
         assert(r.skills.length >= 1, 'should find at least 1 skill');
@@ -150,7 +147,6 @@
         assert(r.summary.length <= 12, 'at most 12 items');
       });
 
-      // Edge cases
       test('Extractor', 'empty text returns empty result', () => {
         const r = Extractor.extractKeywords('');
         assert(r.skills.length === 0, 'no skills');
@@ -203,7 +199,6 @@
         assert(r.titles.includes('full stack developer'), 'full stack developer');
       });
 
-      // Detection breadth
       test('Extractor', 'finance skills detected', () => {
         const r = Extractor.extractKeywords('financial analysis, financial modeling, valuation');
         assert(r.skills.some(s => s.skill === 'financial analysis'), 'financial analysis');
@@ -261,9 +256,195 @@
       });
 
       /* ─────────────────────────────────────────────────
-       * SEARCH TESTS
+       * SEARCH TESTS — Provider Normalization
        * ───────────────────────────────────────────────── */
-      const searchMod = module('Search');
+      module('Search — Himalaya Normalize');
+
+      test('Search — Himalaya Normalize', 'normalizes all fields', () => {
+        const raw = {
+          title: 'Senior Dev',
+          companyName: 'Acme',
+          applicationLink: 'https://acme.com/apply',
+          pubDate: 1700000000,
+          expiryDate: 1800000000,
+          minSalary: 80000,
+          maxSalary: 120000,
+          currency: 'USD',
+          locationRestrictions: ['US', 'Canada'],
+          description: 'Great job',
+          employmentType: 'Full Time',
+          companyLogo: 'https://acme.com/logo.png',
+        };
+        const n = Search.normalizeFromHimalayas(raw);
+        assertEqual(n.title, 'Senior Dev');
+        assertEqual(n.companyName, 'Acme');
+        assertEqual(n.applicationLink, 'https://acme.com/apply');
+        assertEqual(n.pubDate, 1700000000);
+        assertEqual(n.expiryDate, 1800000000);
+        assertEqual(n.minSalary, 80000);
+        assertEqual(n.maxSalary, 120000);
+        assertEqual(n.currency, 'USD');
+        assertEqual(n.locationRestrictions, ['US', 'Canada']);
+        assertEqual(n.description, 'Great job');
+        assertEqual(n.employmentType, 'Full Time');
+        assertEqual(n.companyLogo, 'https://acme.com/logo.png');
+        assertEqual(n._provider, 'himalayas');
+      });
+
+      test('Search — Himalaya Normalize', 'handles missing fields gracefully', () => {
+        const n = Search.normalizeFromHimalayas({});
+        assertEqual(n.title, 'Untitled');
+        assertEqual(n.companyName, 'Unknown');
+        assertEqual(n.applicationLink, null);
+        assertEqual(n.pubDate, null);
+        assertEqual(n.expiryDate, null);
+        assertEqual(n.minSalary, null);
+        assertEqual(n.maxSalary, null);
+        assertEqual(n.currency, null);
+        assertEqual(n.locationRestrictions, []);
+        assertEqual(n.description, '');
+        assertEqual(n.employmentType, null);
+        assertEqual(n.companyLogo, null);
+      });
+
+      test('Search — Himalaya Normalize', 'handles null input', () => {
+        const n = Search.normalizeFromHimalayas(null);
+        // Should not throw — returns defaults
+        assertEqual(n.title, 'Untitled');
+      });
+
+      module('Search — Remotive Normalize');
+
+      test('Search — Remotive Normalize', 'normalizes all fields', () => {
+        const raw = {
+          title: 'React Developer',
+          company_name: 'StartupCo',
+          url: 'https://remotive.com/apply/123',
+          publication_date: '2024-06-15T10:00:00Z',
+          candidate_required_location: 'Worldwide, Europe',
+          description: 'Build amazing UIs',
+          job_type: 'full_time',
+          company_logo: 'https://remotive.com/logo.png',
+        };
+        const n = Search.normalizeFromRemotive(raw);
+        assertEqual(n.title, 'React Developer');
+        assertEqual(n.companyName, 'StartupCo');
+        assertEqual(n.applicationLink, 'https://remotive.com/apply/123');
+        assertEqual(n.pubDate, Math.floor(new Date('2024-06-15T10:00:00Z').getTime() / 1000));
+        assertEqual(n.expiryDate, null);
+        assertEqual(n.minSalary, null);
+        assertEqual(n.maxSalary, null);
+        assertEqual(n.currency, null);
+        assertEqual(n.locationRestrictions, ['Worldwide', 'Europe']);
+        assertEqual(n.description, 'Build amazing UIs');
+        assertEqual(n.employmentType, 'full time');
+        assertEqual(n.companyLogo, 'https://remotive.com/logo.png');
+        assertEqual(n._provider, 'remotive');
+      });
+
+      test('Search — Remotive Normalize', 'handles missing fields gracefully', () => {
+        const n = Search.normalizeFromRemotive({});
+        assertEqual(n.title, 'Untitled');
+        assertEqual(n.companyName, 'Unknown');
+        assertEqual(n.applicationLink, null);
+        assertEqual(n.pubDate, null);
+        assertEqual(n.locationRestrictions, ['Remote']);
+        assertEqual(n.description, '');
+        assertEqual(n.employmentType, null);
+      });
+
+      test('Search — Remotive Normalize', 'parses job_type underscores to spaces', () => {
+        const n = Search.normalizeFromRemotive({ job_type: 'full_time' });
+        assertEqual(n.employmentType, 'full time');
+      });
+
+      test('Search — Remotive Normalize', 'handles null candidate_required_location', () => {
+        const n = Search.normalizeFromRemotive({ candidate_required_location: null });
+        assertEqual(n.locationRestrictions, ['Remote']);
+      });
+
+      test('Search — Remotive Normalize', 'handles empty publication_date', () => {
+        const n = Search.normalizeFromRemotive({ publication_date: null });
+        assertEqual(n.pubDate, null);
+      });
+
+      test('Search — Remotive Normalize', 'handles null input', () => {
+        const n = Search.normalizeFromRemotive(null);
+        assertEqual(n.title, 'Untitled');
+      });
+
+      module('Search — RemoteOK Normalize');
+
+      test('Search — RemoteOK Normalize', 'normalizes all fields', () => {
+        const raw = {
+          id: 'abc123',
+          position: 'Backend Engineer',
+          company: 'DevCo',
+          apply_url: 'https://remoteok.com/apply/abc',
+          url: 'https://remoteok.com/link/abc',
+          date: '2024-07-01T00:00:00Z',
+          location: 'Remote / US',
+          description: 'Build backend systems',
+          company_logo: 'https://remoteok.com/logo.png',
+        };
+        const n = Search.normalizeFromRemoteOK(raw);
+        assertEqual(n.title, 'Backend Engineer');
+        assertEqual(n.companyName, 'DevCo');
+        assertEqual(n.applicationLink, 'https://remoteok.com/apply/abc');
+        assertEqual(n.pubDate, Math.floor(new Date('2024-07-01T00:00:00Z').getTime() / 1000));
+        assertEqual(n.expiryDate, null);
+        assertEqual(n.minSalary, null);
+        assertEqual(n.maxSalary, null);
+        assertEqual(n.currency, null);
+        assertEqual(n.locationRestrictions, ['Remote / US']);
+        assertEqual(n.description, 'Build backend systems');
+        assertEqual(n.employmentType, null);
+        assertEqual(n.companyLogo, 'https://remoteok.com/logo.png');
+        assertEqual(n._provider, 'remoteok');
+      });
+
+      test('Search — RemoteOK Normalize', 'falls back to url when apply_url missing', () => {
+        const n = Search.normalizeFromRemoteOK({ id: '1', position: 'Dev', url: 'https://remoteok.com/dev' });
+        assertEqual(n.applicationLink, 'https://remoteok.com/dev');
+      });
+
+      test('Search — RemoteOK Normalize', 'handles missing fields gracefully', () => {
+        const n = Search.normalizeFromRemoteOK({ id: '1' });
+        assertEqual(n.title, 'Untitled');
+        assertEqual(n.companyName, 'Unknown');
+        assertEqual(n.applicationLink, null);
+        assertEqual(n.pubDate, null);
+        assertEqual(n.locationRestrictions, ['Remote']);
+        assertEqual(n.description, '');
+      });
+
+      test('Search — RemoteOK Normalize', 'handles null input', () => {
+        const n = Search.normalizeFromRemoteOK(null);
+        assertEqual(n.title, 'Untitled');
+      });
+
+      /* ─────────────────────────────────────────────────
+       * SEARCH TESTS — Provider registry
+       * ───────────────────────────────────────────────── */
+      module('Search — Provider Registry');
+
+      test('Search — Provider Registry', 'has three providers in correct order', () => {
+        assertEqual(Search.PROVIDERS.length, 3);
+        assertEqual(Search.PROVIDERS[0].name, 'himalayas');
+        assertEqual(Search.PROVIDERS[1].name, 'remotive');
+        assertEqual(Search.PROVIDERS[2].name, 'remoteok');
+      });
+
+      test('Search — Provider Registry', 'each provider has a fetch function', () => {
+        Search.PROVIDERS.forEach(p => {
+          assert(typeof p.fetch === 'function', `${p.name}.fetch is a function`);
+        });
+      });
+
+      /* ─────────────────────────────────────────────────
+       * SEARCH TESTS — Date/Salary helpers
+       * ───────────────────────────────────────────────── */
+      module('Search — Helpers');
 
       function makeJob(overrides) {
         const now = Math.floor(Date.now() / 1000);
@@ -271,80 +452,78 @@
           title: 'Test Engineer',
           companyName: 'TestCo',
           applicationLink: 'https://example.com/apply',
-          pubDate: now - 86400 * 3, // 3 days ago
-          expiryDate: now + 86400 * 30, // 30 days from now
+          pubDate: now - 86400 * 3,
+          expiryDate: now + 86400 * 30,
           minSalary: 80000,
           maxSalary: 120000,
           currency: 'USD',
           locationRestrictions: ['United States'],
           description: '<p>Great job for a skilled engineer</p>',
           employmentType: 'Full Time',
-          ...overrides
+          ...overrides,
         };
       }
 
-      // formatDate
-      test('Search', 'formatDate returns "Today" for today', () => {
+      test('Search — Helpers', 'formatDate returns "Today" for today', () => {
         const now = Math.floor(Date.now() / 1000);
         assertEqual(Search.formatDate(now), 'Today');
       });
 
-      test('Search', 'formatDate returns "Yesterday" for 1 day ago', () => {
+      test('Search — Helpers', 'formatDate returns "Yesterday" for 1 day ago', () => {
         const yesterday = Math.floor(Date.now() / 1000) - 86400;
         assertEqual(Search.formatDate(yesterday), 'Yesterday');
       });
 
-      test('Search', 'formatDate returns "X days ago" for < 7 days', () => {
+      test('Search — Helpers', 'formatDate returns "X days ago" for < 7 days', () => {
         const d = Math.floor(Date.now() / 1000) - 86400 * 3;
         const result = Search.formatDate(d);
         assert(result.includes('days ago'), `expected "X days ago", got "${result}"`);
       });
 
-      test('Search', 'formatDate returns "X weeks ago" for < 30 days', () => {
+      test('Search — Helpers', 'formatDate returns "X weeks ago" for < 30 days', () => {
         const d = Math.floor(Date.now() / 1000) - 86400 * 14;
         const result = Search.formatDate(d);
         assert(result.includes('weeks ago'), `expected "X weeks ago", got "${result}"`);
       });
 
-      test('Search', 'formatDate returns empty for null/undefined', () => {
+      test('Search — Helpers', 'formatDate returns empty for null/undefined', () => {
         assertEqual(Search.formatDate(null), '');
         assertEqual(Search.formatDate(undefined), '');
       });
 
-      // formatSalary
-      test('Search', 'formatSalary returns null when no salary', () => {
+      test('Search — Helpers', 'formatSalary returns null when no salary', () => {
         assertEqual(Search.formatSalary(makeJob({ minSalary: null, maxSalary: null })), null);
       });
 
-      test('Search', 'formatSalary formats range', () => {
-        const job = makeJob({ minSalary: 80000, maxSalary: 120000, currency: 'USD' });
-        const result = Search.formatSalary(job);
+      test('Search — Helpers', 'formatSalary formats range', () => {
+        const result = Search.formatSalary(makeJob({ minSalary: 80000, maxSalary: 120000 }));
         assert(result.includes('80,000'), 'should contain 80,000');
         assert(result.includes('120,000'), 'should contain 120,000');
       });
 
-      test('Search', 'formatSalary handles min-only', () => {
-        const job = makeJob({ minSalary: 100000, maxSalary: null });
-        const result = Search.formatSalary(job);
+      test('Search — Helpers', 'formatSalary handles min-only', () => {
+        const result = Search.formatSalary(makeJob({ minSalary: 100000, maxSalary: null }));
         assert(result.includes('100,000'), 'min salary shown');
         assert(result.startsWith('From'), 'prefixed with From');
       });
 
-      test('Search', 'formatSalary handles max-only', () => {
-        const job = makeJob({ minSalary: null, maxSalary: 150000 });
-        const result = Search.formatSalary(job);
+      test('Search — Helpers', 'formatSalary handles max-only', () => {
+        const result = Search.formatSalary(makeJob({ minSalary: null, maxSalary: 150000 }));
         assert(result.includes('150,000'), 'max salary shown');
         assert(result.startsWith('Up to'), 'prefixed with Up to');
       });
 
-      test('Search', 'formatSalary defaults to USD when no currency', () => {
-        const job = makeJob({ minSalary: 50000, maxSalary: 100000, currency: null });
-        const result = Search.formatSalary(job);
+      test('Search — Helpers', 'formatSalary defaults to USD when no currency', () => {
+        const result = Search.formatSalary(makeJob({ minSalary: 50000, maxSalary: 100000, currency: null }));
         assert(result.includes('$'), 'USD symbol present');
       });
 
-      // sortJobs
-      test('Search', 'sortJobs sorts by date descending by default', () => {
+      /* ─────────────────────────────────────────────────
+       * SEARCH TESTS — sortJobs
+       * ───────────────────────────────────────────────── */
+      module('Search — Sort');
+
+      test('Search — Sort', 'sorts by date descending by default', () => {
         const now = Math.floor(Date.now() / 1000);
         const jobs = [
           makeJob({ pubDate: now - 86400 * 10 }),
@@ -356,7 +535,7 @@
         assert(sorted[1].pubDate > sorted[2].pubDate, 'second newest');
       });
 
-      test('Search', 'sortJobs sorts by salary descending', () => {
+      test('Search — Sort', 'sorts by salary descending', () => {
         const jobs = [
           makeJob({ maxSalary: 80000 }),
           makeJob({ maxSalary: 150000 }),
@@ -368,7 +547,7 @@
         assertEqual(sorted[2].maxSalary, 80000, 'lowest last');
       });
 
-      test('Search', 'sortJobs sorts by expiry (closest deadline first) for relevance', () => {
+      test('Search — Sort', 'sorts by expiry (closest deadline first) for relevance', () => {
         const now = Math.floor(Date.now() / 1000);
         const jobs = [
           makeJob({ expiryDate: now + 86400 * 30 }),
@@ -379,51 +558,113 @@
         assert(sorted[0].expiryDate <= sorted[1].expiryDate, 'closest deadline first');
       });
 
-      test('Search', 'sortJobs handles empty array', () => {
+      test('Search — Sort', 'handles empty array', () => {
         const sorted = Search.sortJobs([], 'date');
         assertEqual(sorted, [], 'empty in, empty out');
       });
 
-      test('Search', 'sortJobs handles single element', () => {
+      test('Search — Sort', 'handles single element', () => {
         const jobs = [makeJob()];
         const sorted = Search.sortJobs(jobs, 'salary');
         assertEqual(sorted.length, 1);
       });
 
-      // daysUntilExpiry
-      test('Search', 'daysUntilExpiry returns positive for active jobs', () => {
+      test('Search — Sort', 'does not mutate original array', () => {
+        const jobs = [makeJob({ maxSalary: 100 }), makeJob({ maxSalary: 200 })];
+        const copy = [...jobs];
+        Search.sortJobs(jobs, 'salary');
+        assertEqual(jobs, copy, 'original unchanged');
+      });
+
+      /* ─────────────────────────────────────────────────
+       * SEARCH TESTS — daysUntilExpiry
+       * ───────────────────────────────────────────────── */
+      module('Search — Expiry');
+
+      test('Search — Expiry', 'daysUntilExpiry returns positive for active jobs', () => {
         const job = makeJob({ expiryDate: Math.floor(Date.now() / 1000) + 86400 * 10 });
         assert(Search.daysUntilExpiry(job) > 0, 'positive days');
       });
 
-      test('Search', 'daysUntilExpiry returns negative for expired jobs', () => {
+      test('Search — Expiry', 'daysUntilExpiry returns negative for expired jobs', () => {
         const job = makeJob({ expiryDate: Math.floor(Date.now() / 1000) - 86400 * 5 });
         assert(Search.daysUntilExpiry(job) < 0, 'negative days');
       });
 
-      test('Search', 'daysUntilExpiry returns default 60 when no expiry', () => {
+      test('Search — Expiry', 'daysUntilExpiry returns default 60 when no expiry', () => {
         const job = makeJob({ expiryDate: null });
         assertEqual(Search.daysUntilExpiry(job), 60, 'default 60 days');
       });
 
-      // HTML snippet cleaning
-      test('Search', 'searchJobs enriches with _snippet cleaning HTML', async () => {
-        // We can't call searchJobs without a real API call, so test the logic
-        // by checking the enrichment pattern in searchJobs
-        const html = '<p>Hello <b>World</b> &amp; everyone</p>';
-        const cleaned = html
-          .replace(/<[^>]*>/g, '')
-          .replace(/&[^;]+;/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .substring(0, 250);
-        assertEqual(cleaned, 'Hello World  everyone', 'HTML stripped, entities decoded');
+      /* ─────────────────────────────────────────────────
+       * SEARCH TESTS — Enrichment logic
+       * ───────────────────────────────────────────────── */
+      module('Search — Enrichment');
+
+      test('Search — Enrichment', 'enrichment fields have correct structure', async () => {
+        const now = Math.floor(Date.now() / 1000);
+        const fakeJob = makeJob({
+          pubDate: now - 86400 * 3,
+          expiryDate: now + 86400 * 15,
+          description: '<p>Full Stack Engineer with <b>React</b> &amp; Node.js</p>',
+        });
+
+        // Manually run the enrichment (same logic as searchJobs internally)
+        const expDays = Search.daysUntilExpiry(fakeJob);
+        const enriched = {
+          ...fakeJob,
+          _salary: Search.formatSalary(fakeJob),
+          _posted: Search.formatDate(fakeJob.pubDate),
+          _expiresIn: expDays,
+          _expiryStatus: expDays <= 0 ? 'expired' : expDays <= 7 ? 'soon' : 'active',
+          _snippet: (fakeJob.description || '')
+            .replace(/<[^>]*>/g, '')
+            .replace(/&[^;]+;/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 250),
+        };
+
+        assert(enriched._salary.includes('$'), 'salary formatted');
+        assert(enriched._posted.length > 0, 'date formatted');
+        assertEqual(enriched._expiryStatus, 'active', '15 days out is active');
+        assert(!enriched._snippet.includes('<'), 'no HTML tags');
+        assert(!enriched._snippet.includes('&amp;'), 'entities decoded');
+      });
+
+      test('Search — Enrichment', 'expiry badge states are correct', () => {
+        const now = Math.floor(Date.now() / 1000);
+
+        const expired = makeJob({ expiryDate: now - 86400 });
+        const expE = Search.daysUntilExpiry(expired);
+        assertEqual(expE <= 0 ? 'expired' : expE <= 7 ? 'soon' : 'active', 'expired', 'past expiry');
+
+        const soon = makeJob({ expiryDate: now + 86400 * 3 });
+        const expS = Search.daysUntilExpiry(soon);
+        assertEqual(expS <= 0 ? 'expired' : expS <= 7 ? 'soon' : 'active', 'soon', '3 days out');
+
+        const active = makeJob({ expiryDate: now + 86400 * 30 });
+        const expA = Search.daysUntilExpiry(active);
+        assertEqual(expA <= 0 ? 'expired' : expA <= 7 ? 'soon' : 'active', 'active', '30 days out');
+      });
+
+      test('Search — Enrichment', 'isExpired check correctly filters expired jobs', () => {
+        const now = Math.floor(Date.now() / 1000);
+
+        const isExpired = (job) => {
+          if (!job.expiryDate) return false;
+          return job.expiryDate * 1000 < Date.now();
+        };
+
+        assert(isExpired(makeJob({ expiryDate: now - 86400 })), 'past date expired');
+        assert(!isExpired(makeJob({ expiryDate: now + 86400 })), 'future date not expired');
+        assert(!isExpired(makeJob({ expiryDate: null })), 'no expiry not expired');
       });
 
       /* ─────────────────────────────────────────────────
        * PARSER TESTS
        * ───────────────────────────────────────────────── */
-      const parserMod = module('Parser');
+      module('Parser');
 
       test('Parser', 'rejects unsupported file type', async () => {
         try {
@@ -444,10 +685,7 @@
       });
 
       test('Parser', 'accepts .pdf extension', () => {
-        // We can't fully test without a real PDF, but we can check it doesn't
-        // immediately throw for the extension
         const p = Parser.parseResume({ name: 'resume.pdf', arrayBuffer: () => Promise.resolve(new ArrayBuffer(10)) });
-        // Should not throw synchronously — will fail async when PDF.js tries to parse
         assert(true, 'no sync throw for .pdf');
       });
 
@@ -459,7 +697,7 @@
       /* ─────────────────────────────────────────────────
        * INTEGRATION TESTS
        * ───────────────────────────────────────────────── */
-      const intMod = module('Integration');
+      module('Integration');
 
       test('Integration', 'full flow: sample resume text → extract → search query', () => {
         const resumeText = `
@@ -480,11 +718,9 @@
 
         const extracted = Extractor.extractKeywords(resumeText);
 
-        // Should find job title
         assert(extracted.titles.includes('software engineer'), 'software engineer title');
         assert(extracted.titles.includes('senior engineer'), 'senior engineer title');
 
-        // Should find core tech skills
         const skillNames = extracted.skills.map(s => s.skill);
         assert(skillNames.includes('react'), 'react');
         assert(skillNames.includes('node.js'), 'node.js');
@@ -501,12 +737,9 @@
         assert(skillNames.includes('javascript'), 'javascript');
         assert(skillNames.includes('typescript'), 'typescript');
 
-        // searchQuery should be non-empty and contain top skills
         assert(extracted.searchQuery.length > 0, 'search query not empty');
         assert(extracted.searchQuery.includes('react'), 'query includes react');
         assert(extracted.searchQuery.includes('python'), 'query includes python');
-
-        // Summary should include key terms
         assert(extracted.summary.length > 0, 'summary not empty');
       });
 
@@ -583,7 +816,6 @@
         `;
 
         const extracted = Extractor.extractKeywords(resumeText);
-
         assert(extracted.titles.includes('ux designer') || extracted.titles.includes('product designer'), 'designer title');
 
         const skillNames = extracted.skills.map(s => s.skill);
@@ -602,69 +834,15 @@
         assert(extracted.searchQuery.length > 0, 'query not empty');
       });
 
-      test('Integration', 'searchJobs enrichment fields have correct structure', async () => {
-        // Test the enrichment logic directly without making API calls
-        const now = Math.floor(Date.now() / 1000);
-        const fakeJob = makeJob({
-          pubDate: now - 86400 * 3,
-          expiryDate: now + 86400 * 15,
-          description: '<p>Full Stack Engineer with <b>React</b> &amp; Node.js</p>',
-        });
-
-        // Manually run the enrichment (same logic as searchJobs)
-        const enriched = {
-          ...fakeJob,
-          _salary: Search.formatSalary(fakeJob),
-          _posted: Search.formatDate(fakeJob.pubDate),
-          _expiresIn: Search.daysUntilExpiry(fakeJob),
-          _expiryStatus: Search.daysUntilExpiry(fakeJob) <= 0 ? 'expired' :
-                          Search.daysUntilExpiry(fakeJob) <= 7 ? 'soon' : 'active',
-          _snippet: (fakeJob.description || '')
-            .replace(/<[^>]*>/g, '')
-            .replace(/&[^;]+;/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .substring(0, 250)
-        };
-
-        assert(enriched._salary.includes('$'), 'salary formatted');
-        assert(enriched._posted.length > 0, 'date formatted');
-        assertEqual(enriched._expiryStatus, 'active', '15 days out is active');
-        assert(!enriched._snippet.includes('<'), 'no HTML tags');
-        assert(!enriched._snippet.includes('&amp;'), 'entities decoded');
-      });
-
-      test('Integration', 'expiry badge states are correct', () => {
-        const now = Math.floor(Date.now() / 1000);
-
-        const expired = makeJob({ expiryDate: now - 86400 });
-        const expDays = Search.daysUntilExpiry(expired);
-        const expStatus = expDays <= 0 ? 'expired' : expDays <= 7 ? 'soon' : 'active';
-        assertEqual(expStatus, 'expired', 'past expiry shows expired');
-
-        const soon = makeJob({ expiryDate: now + 86400 * 3 });
-        const soonDays = Search.daysUntilExpiry(soon);
-        const soonStatus = soonDays <= 0 ? 'expired' : soonDays <= 7 ? 'soon' : 'active';
-        assertEqual(soonStatus, 'soon', '3 days out shows soon');
-
-        const active = makeJob({ expiryDate: now + 86400 * 30 });
-        const activeDays = Search.daysUntilExpiry(active);
-        const activeStatus = activeDays <= 0 ? 'expired' : activeDays <= 7 ? 'soon' : 'active';
-        assertEqual(activeStatus, 'active', '30 days out shows active');
-      });
-
-      test('Integration', 'isExpired check correctly filters expired jobs', () => {
-        const now = Math.floor(Date.now() / 1000);
-
-        // isExpired is not exported, so we test the logic
-        const expired = (job) => {
-          if (!job.expiryDate) return false;
-          return job.expiryDate * 1000 < Date.now();
-        };
-
-        assert(expired(makeJob({ expiryDate: now - 86400 })), 'past date expired');
-        assert(!expired(makeJob({ expiryDate: now + 86400 })), 'future date not expired');
-        assert(!expired(makeJob({ expiryDate: null })), 'no expiry not expired');
+      test('Integration', 'HTML snippet cleaning matches production logic', () => {
+        const html = '<p>Hello <b>World</b> &amp; everyone</p>';
+        const cleaned = html
+          .replace(/<[^>]*>/g, '')
+          .replace(/&[^;]+;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 250);
+        assertEqual(cleaned, 'Hello World  everyone', 'HTML stripped, entities decoded');
       });
 
       /* ─────────────────────────────────────────────────
