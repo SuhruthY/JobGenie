@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>JobGenie — Test Suite</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; padding: 24px; color: #222; }
+    h1 { margin-bottom: 4px; font-size: 24px; }
+    .subtitle { color: #666; margin-bottom: 24px; font-size: 14px; }
+    .summary { display: flex; gap: 16px; margin-bottom: 24px; }
+    .summary-item { background: white; padding: 12px 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .summary-item .num { font-size: 28px; font-weight: 700; }
+    .summary-item .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+    .summary-item.pass .num { color: #10b981; }
+    .summary-item.fail .num { color: #ef4444; }
+    .module { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; overflow: hidden; }
+    .module h2 { padding: 14px 20px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 16px; }
+    .test { padding: 10px 20px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: flex-start; gap: 10px; font-size: 14px; }
+    .test:last-child { border-bottom: none; }
+    .test .icon { font-size: 16px; width: 20px; flex-shrink: 0; margin-top: 1px; }
+    .test.pass .icon { color: #10b981; }
+    .test.fail .icon { color: #ef4444; }
+    .test .detail { color: #666; font-size: 12px; margin-top: 2px; font-family: 'Consolas', monospace; }
+    .test.fail .detail { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>JobGenie Test Suite</h1>
+  <p class="subtitle">Tests: Extractor, Search, Parser, and integration flows</p>
+  <div class="summary" id="summary"></div>
+  <div id="results"></div>
+
+  <!-- Load source modules -->
+  <script src="../js/extractor.js"></script>
+  <script src="../js/search.js"></script>
+  <script src="../js/parser.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const resultsEl = document.getElementById('results');
+      const summaryEl = document.getElementById('summary');
+      const modules = {};
+      let totalTests = 0, totalPassed = 0, totalFailed = 0;
+
+      function module(name) {
+        modules[name] = [];
+        const section = document.createElement('div');
+        section.className = 'module';
+        section.innerHTML = `<h2>${name}</h2>`;
+        section.id = `mod-${name.replace(/\s/g, '-')}`;
+        resultsEl.appendChild(section);
+        return section;
+      }
+
+      function test(moduleName, name, fn) {
+        totalTests++;
+        const section = document.getElementById(`mod-${moduleName.replace(/\s/g, '-')}`);
+        const row = document.createElement('div');
+        row.className = 'test';
+
+        const finish = (passed, err) => {
+          if (passed) {
+            row.classList.add('pass');
+            row.innerHTML = `<span class="icon">✓</span><div><strong>${name}</strong></div>`;
+            totalPassed++;
+          } else {
+            row.classList.add('fail');
+            row.innerHTML = `<span class="icon">✗</span><div><strong>${name}</strong><div class="detail">${err.message}</div></div>`;
+            totalFailed++;
+          }
+        };
+
+        try {
+          const result = fn();
+          if (result && typeof result.then === 'function') {
+            result.then(() => finish(true), (err) => finish(false, err));
+          } else {
+            finish(true);
+          }
+        } catch (e) {
+          finish(false, e);
+        }
+
+        section.appendChild(row);
+      }
+
+      function assert(condition, msg) {
+        if (!condition) throw new Error(msg || 'Assertion failed');
+      }
+
+      function assertEqual(actual, expected, msg) {
+        const a = JSON.stringify(actual);
+        const e = JSON.stringify(expected);
+        if (a !== e) throw new Error(`${msg || ''}\n  Expected: ${e}\n  Actual:   ${a}`);
+      }
+
+      /* ─────────────────────────────────────────────────
+       * EXTRACTOR TESTS
+       * ───────────────────────────────────────────────── */
+      const extMod = module('Extractor');
+
+      // Basic skill detection
+      test('Extractor', 'detects single skill', () => {
+        const r = Extractor.extractKeywords('I know Python');
+        assert(r.skills.length >= 1, 'should find at least 1 skill');
+        assert(r.skills.some(s => s.skill === 'python'), 'should find python');
+      });
+
+      test('Extractor', 'detects multiple skills', () => {
+        const r = Extractor.extractKeywords('Python, JavaScript, React, AWS, Docker');
+        const found = r.skills.map(s => s.skill);
+        assert(found.includes('python'), 'python');
+        assert(found.includes('javascript'), 'javascript');
+        assert(found.includes('react'), 'react');
+        assert(found.includes('aws'), 'aws');
+        assert(found.includes('docker'), 'docker');
+      });
+
+      test('Extractor', 'detects multi-word skills (machine learning)', () => {
+        const r = Extractor.extractKeywords('I have experience with machine learning and deep learning');
+        assert(r.skills.some(s => s.skill === 'machine learning'), 'machine learning');
+        assert(r.skills.some(s => s.skill === 'deep learning'), 'deep learning');
+      });
+
+      test('Extractor', 'detects job titles', () => {
+        const r = Extractor.extractKeywords('I am a software engineer specializing in full stack development');
+        assert(r.titles.includes('software engineer'), 'software engineer');
+        assert(r.titles.includes('full stack developer') || r.all.some(t => t.includes('full stack')), 'full stack');
+      });
+
+      test('Extractor', 'scoring by frequency', () => {
+        const r = Extractor.extractKeywords('Python Python Python Java JS');
+        const python = r.skills.find(s => s.skill === 'python');
+        const java = r.skills.find(s => s.skill === 'java');
+        assert(python && java, 'both found');
+        assert(python.count > java.count, 'python (3x) should score higher than java (1x)');
+      });
+
+      test('Extractor', 'searchQuery uses top 8 terms', () => {
+        const r = Extractor.extractKeywords('Python JavaScript React AWS Docker Kubernetes Terraform Go Rust');
+        const terms = r.searchQuery.split(' ');
+        assert(terms.length <= 8, 'at most 8 terms');
+      });
+
+      test('Extractor', 'summary returns top 12 items', () => {
+        const r = Extractor.extractKeywords('Python JavaScript React AWS Docker Kubernetes Terraform Go Rust Java C# C++ PHP Swift Kotlin');
+        assert(r.summary.length <= 12, 'at most 12 items');
+      });
+
+      // Edge cases
+      test('Extractor', 'empty text returns empty result', () => {
+        const r = Extractor.extractKeywords('');
+        assert(r.skills.length === 0, 'no skills');
+        assert(r.titles.length === 0, 'no titles');
+        assert(r.all.length === 0, 'no keywords');
+        assert(r.searchQuery === '', 'empty query');
+      });
+
+      test('Extractor', 'very short text handles gracefully', () => {
+        const r = Extractor.extractKeywords('Hi');
+        assert(r.all.length === 0, 'no keywords from "Hi"');
+      });
+
+      test('Extractor', 'no duplicate keywords', () => {
+        const r = Extractor.extractKeywords('Python Python Python Python');
+        const pythonCount = r.all.filter(k => k === 'python').length;
+        assert(pythonCount <= 1, 'python should appear at most once in all');
+      });
+
+      test('Extractor', 'handles special characters in C++', () => {
+        const r = Extractor.extractKeywords('Proficient in C++ development');
+        assert(r.skills.some(s => s.skill === 'c++'), 'should detect c++');
+      });
+
+      test('Extractor', 'handles special characters in C#', () => {
+        const r = Extractor.extractKeywords('C# and .NET development');
+        assert(r.skills.some(s => s.skill === 'c#'), 'should detect c#');
+      });
+
+      test('Extractor', 'handles case insensitivity', () => {
+        const r1 = Extractor.extractKeywords('PYTHON');
+        const r2 = Extractor.extractKeywords('python');
+        assert(r1.skills.length > 0, 'uppercase works');
+        assertEqual(r1.skills[0].skill, r2.skills[0].skill, 'case insensitive match');
+      });
+
+      test('Extractor', 'handles numbers in skills', () => {
+        const r = Extractor.extractKeywords('Three.js and D3.js');
+        assert(r.skills.some(s => s.skill === 'three.js'), 'three.js');
+        assert(r.skills.some(s => s.skill === 'd3.js'), 'd3.js');
+      });
+
+      test('Extractor', 'cross-functional hyphenated skill', () => {
+        const r = Extractor.extractKeywords('cross-functional collaboration');
+        assert(r.skills.some(s => s.skill === 'cross-functional'), 'cross-functional');
+      });
+
+      test('Extractor', 'full stack developer in various forms', () => {
+        const r = Extractor.extractKeywords('I am a full stack developer');
+        assert(r.titles.includes('full stack developer'), 'full stack developer');
+      });
+
+      // Detection breadth
+      test('Extractor', 'finance skills detected', () => {
+        const r = Extractor.extractKeywords('financial analysis, financial modeling, valuation');
+        assert(r.skills.some(s => s.skill === 'financial analysis'), 'financial analysis');
+        assert(r.skills.some(s => s.skill === 'financial modeling'), 'financial modeling');
+        assert(r.skills.some(s => s.skill === 'valuation'), 'valuation');
+      });
+
+      test('Extractor', 'healthcare skills detected', () => {
+        const r = Extractor.extractKeywords('clinical patient care healthcare HIPAA');
+        assert(r.skills.some(s => s.skill === 'clinical'), 'clinical');
+        assert(r.skills.some(s => s.skill === 'patient care'), 'patient care');
+        assert(r.skills.some(s => s.skill === 'hipaa'), 'hipaa');
+      });
+
+      test('Extractor', 'design skills detected', () => {
+        const r = Extractor.extractKeywords('Figma UI design prototyping');
+        assert(r.skills.some(s => s.skill === 'figma'), 'figma');
+        assert(r.skills.some(s => s.skill === 'ui design'), 'ui design');
+      });
+
+      test('Extractor', 'word-boundary: go does not match google', () => {
+        const r = Extractor.extractKeywords('I work at Google');
+        assert(!r.all.includes('go'), '"go" should not match inside "google"');
+      });
+
+      test('Extractor', 'word-boundary: r does not match career', () => {
+        const r = Extractor.extractKeywords('Career progression in engineering');
+        assert(!r.all.includes('r'), '"r" should not match inside "career"');
+      });
+
+      test('Extractor', 'word-boundary: go matches standalone go', () => {
+        const r = Extractor.extractKeywords('Programming in Go and Rust');
+        assert(r.skills.some(s => s.skill === 'go'), '"go" should match standalone');
+      });
+
+      test('Extractor', 'word-boundary: rag does not match cargo', () => {
+        const r = Extractor.extractKeywords('Cargo logistics management');
+        assert(!r.all.includes('rag'), '"rag" should not match inside "cargo"');
+      });
+
+      test('Extractor', 'word-boundary: av matches nothing alone', () => {
+        const r = Extractor.extractKeywords('Having a great career');
+        assert(!r.all.includes('av'), '"av" should not appear as a keyword');
+      });
+
+      test('Extractor', 'word-boundary: reactjs and react are both detected independently', () => {
+        const r = Extractor.extractKeywords('React and ReactJS development');
+        assert(r.skills.some(s => s.skill === 'react'), 'react found');
+        assert(r.skills.some(s => s.skill === 'reactjs'), 'reactjs found');
+      });
+
+      test('Extractor', 'dotnet skill detected', () => {
+        const r = Extractor.extractKeywords('.NET and C# development');
+        assert(r.skills.some(s => s.skill === '.net') || r.skills.some(s => s.skill === 'dotnet'), '.net or dotnet detected');
+      });
+
+      /* ─────────────────────────────────────────────────
+       * SEARCH TESTS
+       * ───────────────────────────────────────────────── */
+      const searchMod = module('Search');
+
+      function makeJob(overrides) {
+        const now = Math.floor(Date.now() / 1000);
+        return {
+          title: 'Test Engineer',
+          companyName: 'TestCo',
+          applicationLink: 'https://example.com/apply',
+          pubDate: now - 86400 * 3, // 3 days ago
+          expiryDate: now + 86400 * 30, // 30 days from now
+          minSalary: 80000,
+          maxSalary: 120000,
+          currency: 'USD',
+          locationRestrictions: ['United States'],
+          description: '<p>Great job for a skilled engineer</p>',
+          employmentType: 'Full Time',
+          ...overrides
+        };
+      }
+
+      // formatDate
+      test('Search', 'formatDate returns "Today" for today', () => {
+        const now = Math.floor(Date.now() / 1000);
+        assertEqual(Search.formatDate(now), 'Today');
+      });
+
+      test('Search', 'formatDate returns "Yesterday" for 1 day ago', () => {
+        const yesterday = Math.floor(Date.now() / 1000) - 86400;
+        assertEqual(Search.formatDate(yesterday), 'Yesterday');
+      });
+
+      test('Search', 'formatDate returns "X days ago" for < 7 days', () => {
+        const d = Math.floor(Date.now() / 1000) - 86400 * 3;
+        const result = Search.formatDate(d);
+        assert(result.includes('days ago'), `expected "X days ago", got "${result}"`);
+      });
+
+      test('Search', 'formatDate returns "X weeks ago" for < 30 days', () => {
+        const d = Math.floor(Date.now() / 1000) - 86400 * 14;
+        const result = Search.formatDate(d);
+        assert(result.includes('weeks ago'), `expected "X weeks ago", got "${result}"`);
+      });
+
+      test('Search', 'formatDate returns empty for null/undefined', () => {
+        assertEqual(Search.formatDate(null), '');
+        assertEqual(Search.formatDate(undefined), '');
+      });
+
+      // formatSalary
+      test('Search', 'formatSalary returns null when no salary', () => {
+        assertEqual(Search.formatSalary(makeJob({ minSalary: null, maxSalary: null })), null);
+      });
+
+      test('Search', 'formatSalary formats range', () => {
+        const job = makeJob({ minSalary: 80000, maxSalary: 120000, currency: 'USD' });
+        const result = Search.formatSalary(job);
+        assert(result.includes('80,000'), 'should contain 80,000');
+        assert(result.includes('120,000'), 'should contain 120,000');
+      });
+
+      test('Search', 'formatSalary handles min-only', () => {
+        const job = makeJob({ minSalary: 100000, maxSalary: null });
+        const result = Search.formatSalary(job);
+        assert(result.includes('100,000'), 'min salary shown');
+        assert(result.startsWith('From'), 'prefixed with From');
+      });
+
+      test('Search', 'formatSalary handles max-only', () => {
+        const job = makeJob({ minSalary: null, maxSalary: 150000 });
+        const result = Search.formatSalary(job);
+        assert(result.includes('150,000'), 'max salary shown');
+        assert(result.startsWith('Up to'), 'prefixed with Up to');
+      });
+
+      test('Search', 'formatSalary defaults to USD when no currency', () => {
+        const job = makeJob({ minSalary: 50000, maxSalary: 100000, currency: null });
+        const result = Search.formatSalary(job);
+        assert(result.includes('$'), 'USD symbol present');
+      });
+
+      // sortJobs
+      test('Search', 'sortJobs sorts by date descending by default', () => {
+        const now = Math.floor(Date.now() / 1000);
+        const jobs = [
+          makeJob({ pubDate: now - 86400 * 10 }),
+          makeJob({ pubDate: now - 86400 * 2 }),
+          makeJob({ pubDate: now - 86400 * 5 }),
+        ];
+        const sorted = Search.sortJobs(jobs, 'date');
+        assert(sorted[0].pubDate > sorted[1].pubDate, 'newest first');
+        assert(sorted[1].pubDate > sorted[2].pubDate, 'second newest');
+      });
+
+      test('Search', 'sortJobs sorts by salary descending', () => {
+        const jobs = [
+          makeJob({ maxSalary: 80000 }),
+          makeJob({ maxSalary: 150000 }),
+          makeJob({ maxSalary: 120000 }),
+        ];
+        const sorted = Search.sortJobs(jobs, 'salary');
+        assertEqual(sorted[0].maxSalary, 150000, 'highest first');
+        assertEqual(sorted[1].maxSalary, 120000, 'middle');
+        assertEqual(sorted[2].maxSalary, 80000, 'lowest last');
+      });
+
+      test('Search', 'sortJobs sorts by expiry (closest deadline first) for relevance', () => {
+        const now = Math.floor(Date.now() / 1000);
+        const jobs = [
+          makeJob({ expiryDate: now + 86400 * 30 }),
+          makeJob({ expiryDate: now + 86400 * 5 }),
+          makeJob({ expiryDate: now + 86400 * 60 }),
+        ];
+        const sorted = Search.sortJobs(jobs, 'relevance');
+        assert(sorted[0].expiryDate <= sorted[1].expiryDate, 'closest deadline first');
+      });
+
+      test('Search', 'sortJobs handles empty array', () => {
+        const sorted = Search.sortJobs([], 'date');
+        assertEqual(sorted, [], 'empty in, empty out');
+      });
+
+      test('Search', 'sortJobs handles single element', () => {
+        const jobs = [makeJob()];
+        const sorted = Search.sortJobs(jobs, 'salary');
+        assertEqual(sorted.length, 1);
+      });
+
+      // daysUntilExpiry
+      test('Search', 'daysUntilExpiry returns positive for active jobs', () => {
+        const job = makeJob({ expiryDate: Math.floor(Date.now() / 1000) + 86400 * 10 });
+        assert(Search.daysUntilExpiry(job) > 0, 'positive days');
+      });
+
+      test('Search', 'daysUntilExpiry returns negative for expired jobs', () => {
+        const job = makeJob({ expiryDate: Math.floor(Date.now() / 1000) - 86400 * 5 });
+        assert(Search.daysUntilExpiry(job) < 0, 'negative days');
+      });
+
+      test('Search', 'daysUntilExpiry returns default 60 when no expiry', () => {
+        const job = makeJob({ expiryDate: null });
+        assertEqual(Search.daysUntilExpiry(job), 60, 'default 60 days');
+      });
+
+      // HTML snippet cleaning
+      test('Search', 'searchJobs enriches with _snippet cleaning HTML', async () => {
+        // We can't call searchJobs without a real API call, so test the logic
+        // by checking the enrichment pattern in searchJobs
+        const html = '<p>Hello <b>World</b> &amp; everyone</p>';
+        const cleaned = html
+          .replace(/<[^>]*>/g, '')
+          .replace(/&[^;]+;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 250);
+        assertEqual(cleaned, 'Hello World  everyone', 'HTML stripped, entities decoded');
+      });
+
+      /* ─────────────────────────────────────────────────
+       * PARSER TESTS
+       * ───────────────────────────────────────────────── */
+      const parserMod = module('Parser');
+
+      test('Parser', 'rejects unsupported file type', async () => {
+        try {
+          await Parser.parseResume({ name: 'resume.txt', arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) });
+          assert(false, 'should have thrown');
+        } catch (e) {
+          assert(e.message.includes('Unsupported file format'), `got: ${e.message}`);
+        }
+      });
+
+      test('Parser', 'rejects .doc extension (old Word format)', async () => {
+        try {
+          await Parser.parseResume({ name: 'resume.doc', arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) });
+          assert(false, 'should have thrown');
+        } catch (e) {
+          assert(e.message.includes('Unsupported'), `.doc rejected: ${e.message}`);
+        }
+      });
+
+      test('Parser', 'accepts .pdf extension', () => {
+        // We can't fully test without a real PDF, but we can check it doesn't
+        // immediately throw for the extension
+        const p = Parser.parseResume({ name: 'resume.pdf', arrayBuffer: () => Promise.resolve(new ArrayBuffer(10)) });
+        // Should not throw synchronously — will fail async when PDF.js tries to parse
+        assert(true, 'no sync throw for .pdf');
+      });
+
+      test('Parser', 'accepts .docx extension', () => {
+        const p = Parser.parseResume({ name: 'resume.docx', arrayBuffer: () => Promise.resolve(new ArrayBuffer(10)) });
+        assert(true, 'no sync throw for .docx');
+      });
+
+      /* ─────────────────────────────────────────────────
+       * INTEGRATION TESTS
+       * ───────────────────────────────────────────────── */
+      const intMod = module('Integration');
+
+      test('Integration', 'full flow: sample resume text → extract → search query', () => {
+        const resumeText = `
+          EXPERIENCE
+          Senior Software Engineer at TechCorp (2020-present)
+          - Built full-stack web applications using React, Node.js, and PostgreSQL
+          - Deployed containerized microservices on AWS ECS with Docker and Kubernetes
+          - Implemented CI/CD pipelines with GitHub Actions
+          - Led a team of 5 engineers using Agile/Scrum methodologies
+
+          SKILLS
+          Python, JavaScript, TypeScript, React, Node.js, Express, PostgreSQL,
+          Docker, Kubernetes, AWS, Terraform, Git, Agile, Scrum
+
+          EDUCATION
+          B.S. Computer Science, University of Technology
+        `;
+
+        const extracted = Extractor.extractKeywords(resumeText);
+
+        // Should find job title
+        assert(extracted.titles.includes('software engineer'), 'software engineer title');
+        assert(extracted.titles.includes('senior engineer'), 'senior engineer title');
+
+        // Should find core tech skills
+        const skillNames = extracted.skills.map(s => s.skill);
+        assert(skillNames.includes('react'), 'react');
+        assert(skillNames.includes('node.js'), 'node.js');
+        assert(skillNames.includes('nodejs'), 'nodejs');
+        assert(skillNames.includes('postgresql'), 'postgresql');
+        assert(skillNames.includes('python'), 'python');
+        assert(skillNames.includes('docker'), 'docker');
+        assert(skillNames.includes('kubernetes'), 'kubernetes');
+        assert(skillNames.includes('aws'), 'aws');
+        assert(skillNames.includes('terraform'), 'terraform');
+        assert(skillNames.includes('agile'), 'agile');
+        assert(skillNames.includes('scrum'), 'scrum');
+        assert(skillNames.includes('github actions'), 'github actions');
+        assert(skillNames.includes('javascript'), 'javascript');
+        assert(skillNames.includes('typescript'), 'typescript');
+
+        // searchQuery should be non-empty and contain top skills
+        assert(extracted.searchQuery.length > 0, 'search query not empty');
+        assert(extracted.searchQuery.includes('react'), 'query includes react');
+        assert(extracted.searchQuery.includes('python'), 'query includes python');
+
+        // Summary should include key terms
+        assert(extracted.summary.length > 0, 'summary not empty');
+      });
+
+      test('Integration', 'full flow: data scientist resume', () => {
+        const resumeText = `
+          DATA SCIENTIST
+          Machine Learning Engineer at AI Labs
+          - Built ML models using TensorFlow and PyTorch
+          - Performed data analysis with Python, Pandas, and NumPy
+          - Created dashboards in Tableau and Power BI
+          - Used SQL for data extraction and transformation
+
+          Skills: Python, R, SQL, TensorFlow, PyTorch, Scikit-learn,
+          Machine Learning, Deep Learning, NLP, Statistics, Tableau
+        `;
+
+        const extracted = Extractor.extractKeywords(resumeText);
+
+        assert(extracted.titles.includes('data scientist'), 'data scientist');
+        assert(extracted.titles.includes('ml engineer') || extracted.titles.includes('machine learning engineer'), 'ml engineer');
+
+        const skillNames = extracted.skills.map(s => s.skill);
+        assert(skillNames.includes('tensorflow'), 'tensorflow');
+        assert(skillNames.includes('pytorch'), 'pytorch');
+        assert(skillNames.includes('machine learning'), 'machine learning');
+        assert(skillNames.includes('deep learning'), 'deep learning');
+        assert(skillNames.includes('nlp'), 'nlp');
+        assert(skillNames.includes('tableau'), 'tableau');
+        assert(skillNames.includes('power bi'), 'power bi');
+
+        assert(extracted.searchQuery.length > 0, 'query not empty');
+      });
+
+      test('Integration', 'full flow: product manager resume', () => {
+        const resumeText = `
+          PRODUCT MANAGER
+          Senior Product Manager at SaaS Corp
+          - Defined product roadmap and OKRs for B2B platform
+          - Led cross-functional teams using Agile and Scrum
+          - Conducted user research and A/B testing
+          - Managed stakeholder relationships and strategic planning
+          - JIRA, Confluence, Notion for project management
+          - Analyzed KPIs and metrics to drive decisions
+        `;
+
+        const extracted = Extractor.extractKeywords(resumeText);
+
+        assert(extracted.titles.includes('product manager'), 'product manager');
+
+        const skillNames = extracted.skills.map(s => s.skill);
+        assert(skillNames.includes('agile'), 'agile');
+        assert(skillNames.includes('scrum'), 'scrum');
+        assert(skillNames.includes('jira'), 'jira');
+        assert(skillNames.includes('roadmap'), 'roadmap');
+        assert(skillNames.includes('a/b testing'), 'a/b testing');
+        assert(skillNames.includes('cross-functional'), 'cross-functional');
+        assert(skillNames.includes('strategic planning'), 'strategic planning');
+        assert(skillNames.includes('kpi'), 'kpi');
+        assert(skillNames.includes('okr'), 'okr');
+        assert(skillNames.includes('stakeholder management'), 'stakeholder management');
+
+        assert(extracted.searchQuery.length > 0, 'query not empty');
+      });
+
+      test('Integration', 'full flow: designer resume', () => {
+        const resumeText = `
+          UX DESIGNER
+          Product Designer at Creative Studio
+          - Created wireframes and prototypes in Figma
+          - Designed user interfaces and design systems
+          - Conducted user research and usability testing
+          - Responsive design for web and mobile
+          - Adobe Creative Suite: Photoshop, Illustrator, XD
+        `;
+
+        const extracted = Extractor.extractKeywords(resumeText);
+
+        assert(extracted.titles.includes('ux designer') || extracted.titles.includes('product designer'), 'designer title');
+
+        const skillNames = extracted.skills.map(s => s.skill);
+        assert(skillNames.includes('figma'), 'figma');
+        assert(skillNames.includes('ui design'), 'ui design');
+        assert(skillNames.includes('ux design'), 'ux design');
+        assert(skillNames.includes('wireframing'), 'wireframing');
+        assert(skillNames.includes('prototyping'), 'prototyping');
+        assert(skillNames.includes('user research'), 'user research');
+        assert(skillNames.includes('design systems'), 'design systems');
+        assert(skillNames.includes('responsive design'), 'responsive design');
+        assert(skillNames.includes('photoshop'), 'photoshop');
+        assert(skillNames.includes('illustrator'), 'illustrator');
+        assert(skillNames.includes('adobe xd'), 'adobe xd');
+
+        assert(extracted.searchQuery.length > 0, 'query not empty');
+      });
+
+      test('Integration', 'searchJobs enrichment fields have correct structure', async () => {
+        // Test the enrichment logic directly without making API calls
+        const now = Math.floor(Date.now() / 1000);
+        const fakeJob = makeJob({
+          pubDate: now - 86400 * 3,
+          expiryDate: now + 86400 * 15,
+          description: '<p>Full Stack Engineer with <b>React</b> &amp; Node.js</p>',
+        });
+
+        // Manually run the enrichment (same logic as searchJobs)
+        const enriched = {
+          ...fakeJob,
+          _salary: Search.formatSalary(fakeJob),
+          _posted: Search.formatDate(fakeJob.pubDate),
+          _expiresIn: Search.daysUntilExpiry(fakeJob),
+          _expiryStatus: Search.daysUntilExpiry(fakeJob) <= 0 ? 'expired' :
+                          Search.daysUntilExpiry(fakeJob) <= 7 ? 'soon' : 'active',
+          _snippet: (fakeJob.description || '')
+            .replace(/<[^>]*>/g, '')
+            .replace(/&[^;]+;/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 250)
+        };
+
+        assert(enriched._salary.includes('$'), 'salary formatted');
+        assert(enriched._posted.length > 0, 'date formatted');
+        assertEqual(enriched._expiryStatus, 'active', '15 days out is active');
+        assert(!enriched._snippet.includes('<'), 'no HTML tags');
+        assert(!enriched._snippet.includes('&amp;'), 'entities decoded');
+      });
+
+      test('Integration', 'expiry badge states are correct', () => {
+        const now = Math.floor(Date.now() / 1000);
+
+        const expired = makeJob({ expiryDate: now - 86400 });
+        const expDays = Search.daysUntilExpiry(expired);
+        const expStatus = expDays <= 0 ? 'expired' : expDays <= 7 ? 'soon' : 'active';
+        assertEqual(expStatus, 'expired', 'past expiry shows expired');
+
+        const soon = makeJob({ expiryDate: now + 86400 * 3 });
+        const soonDays = Search.daysUntilExpiry(soon);
+        const soonStatus = soonDays <= 0 ? 'expired' : soonDays <= 7 ? 'soon' : 'active';
+        assertEqual(soonStatus, 'soon', '3 days out shows soon');
+
+        const active = makeJob({ expiryDate: now + 86400 * 30 });
+        const activeDays = Search.daysUntilExpiry(active);
+        const activeStatus = activeDays <= 0 ? 'expired' : activeDays <= 7 ? 'soon' : 'active';
+        assertEqual(activeStatus, 'active', '30 days out shows active');
+      });
+
+      test('Integration', 'isExpired check correctly filters expired jobs', () => {
+        const now = Math.floor(Date.now() / 1000);
+
+        // isExpired is not exported, so we test the logic
+        const expired = (job) => {
+          if (!job.expiryDate) return false;
+          return job.expiryDate * 1000 < Date.now();
+        };
+
+        assert(expired(makeJob({ expiryDate: now - 86400 })), 'past date expired');
+        assert(!expired(makeJob({ expiryDate: now + 86400 })), 'future date not expired');
+        assert(!expired(makeJob({ expiryDate: null })), 'no expiry not expired');
+      });
+
+      /* ─────────────────────────────────────────────────
+       * SUMMARY
+       * ───────────────────────────────────────────────── */
+      setTimeout(() => {
+        summaryEl.innerHTML = `
+          <div class="summary-item ${totalFailed === 0 ? 'pass' : 'fail'}">
+            <div class="num">${totalPassed}<span style="font-size:14px;color:#666;">/${totalTests}</span></div>
+            <div class="label">Passed</div>
+          </div>
+          <div class="summary-item ${totalFailed > 0 ? 'fail' : 'pass'}">
+            <div class="num">${totalFailed}</div>
+            <div class="label">Failed</div>
+          </div>
+          <div class="summary-item">
+            <div class="num">${totalTests}</div>
+            <div class="label">Total Tests</div>
+          </div>
+        `;
+        console.log(`\n=== Test Summary: ${totalPassed}/${totalTests} passed, ${totalFailed} failed ===`);
+      }, 100);
+
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JobGenie — Find jobs from your resume</title>
+  <meta name="description" content="Upload your resume and instantly find relevant job openings with direct apply links. Zero storage, real-time.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- PDF.js for parsing PDF resumes -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+  <!-- Mammoth.js for parsing DOCX resumes -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+</head>
+<body>
+
+  <!-- ─── HEADER ─────────────────────────────────────── -->
+  <header class="header">
+    <div class="container">
+      <div class="header__inner">
+        <div class="header__logo">
+          <svg class="header__logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          </svg>
+          <span class="header__logo-text">JobGenie</span>
+        </div>
+        <p class="header__tagline">Upload your resume. Find matching jobs. Apply directly.</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── MAIN ────────────────────────────────────────── -->
+  <main class="main">
+    <div class="container">
+
+      <!-- Upload Section -->
+      <section class="upload" id="uploadSection">
+        <div class="upload__zone" id="dropZone">
+          <div class="upload__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
+            </svg>
+          </div>
+          <h2 class="upload__title">Drop your resume here</h2>
+          <p class="upload__subtitle">PDF or DOCX &middot; Parsed in your browser &middot; Nothing is uploaded</p>
+          <label class="upload__btn" for="fileInput">Choose a file</label>
+          <input type="file" id="fileInput" accept=".pdf,.docx" hidden>
+          <p class="upload__hint" id="fileHint">No file selected</p>
+        </div>
+      </section>
+
+      <!-- Keywords display -->
+      <section class="keywords" id="keywordsSection" hidden>
+        <div class="keywords__header">
+          <h3>Extracted from your resume</h3>
+          <span class="keywords__count" id="keywordsCount"></span>
+        </div>
+        <div class="keywords__tags" id="keywordsTags"></div>
+        <button class="keywords__search-btn" id="searchBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          Find Matching Jobs
+        </button>
+      </section>
+
+      <!-- Loading -->
+      <section class="loading" id="loadingSection" hidden>
+        <div class="loading__spinner"></div>
+        <p class="loading__text" id="loadingText">Searching for matching jobs…</p>
+      </section>
+
+      <!-- Results -->
+      <section class="results" id="resultsSection" hidden>
+        <div class="results__toolbar">
+          <div class="results__info">
+            <span class="results__count" id="resultsCount">0</span> jobs found
+          </div>
+          <div class="results__sort">
+            <label for="sortSelect">Sort by</label>
+            <select id="sortSelect">
+              <option value="date">Newest first</option>
+              <option value="salary">Highest salary</option>
+              <option value="relevance">Relevance</option>
+            </select>
+          </div>
+        </div>
+        <div class="results__grid" id="resultsGrid"></div>
+      </section>
+
+      <!-- Empty state -->
+      <section class="empty" id="emptySection" hidden>
+        <div class="empty__inner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <h3>No jobs found</h3>
+          <p id="emptyMessage">Try uploading a different resume or adjusting your search keywords.</p>
+        </div>
+      </section>
+
+      <!-- Error state -->
+      <section class="error" id="errorSection" hidden>
+        <div class="error__inner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+            <circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/>
+          </svg>
+          <h3>Something went wrong</h3>
+          <p id="errorMessage">Unable to search for jobs. Please try again.</p>
+          <button class="keywords__search-btn" id="retryBtn">Retry</button>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ─── FOOTER ──────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="container">
+      <p>No data is stored. Your resume is parsed entirely in your browser. <a href="https://himalayas.app" target="_blank" rel="noopener">Job data from Himalayas</a>.</p>
+    </div>
+  </footer>
+
+  <!-- Application scripts -->
+  <script src="js/parser.js"></script>
+  <script src="js/extractor.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
