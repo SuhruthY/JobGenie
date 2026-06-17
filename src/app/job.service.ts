@@ -10,9 +10,10 @@ interface Provider {
 export class JobService {
   private readonly FETCH_TIMEOUT_MS = 15000;
   private readonly MAX_JOB_AGE_DAYS = 60;
-
+  private readonly MAX_INITIAL = 40;
+  // Provider order: Jobicy (diverse CORS-friendly) → Remotive → RemoteOK
   private readonly searchProviders: Provider[] = [
-    { name: 'himalayas', fetch: (q) => this.fetchHimalayas(q) },
+    { name: 'jobicy', fetch: (q) => this.fetchJobicy(q) },
     { name: 'remotive', fetch: (q) => this.fetchRemotive(q) },
     { name: 'remoteok', fetch: (q) => this.fetchRemoteOK(q) },
   ];
@@ -20,13 +21,11 @@ export class JobService {
   /* ─── Initial diversified feed ─────────────── */
 
   async fetchInitialJobs(): Promise<Job[]> {
-    // Fetch from all providers without search terms for maximum diversity
     const results = await Promise.allSettled([
-      this.fetchHimalayasBrowse(),
+      this.fetchJobicy(''),
       this.fetchRemotive(''),
       this.fetchRemoteOK(''),
     ]);
-
     const all: Job[] = [];
     for (const r of results) {
       if (r.status === 'fulfilled') all.push(...r.value);
@@ -40,8 +39,7 @@ export class JobService {
       seen.add(key);
       return true;
     });
-    // Shuffle to show diversity (not all from one provider)
-    return this.shuffle(this.sortJobs(this.enrichJobs(deduped), 'date')).slice(0, 40);
+    return this.shuffle(this.sortJobs(this.enrichJobs(deduped), 'date')).slice(0, this.MAX_INITIAL);
   }
 
   /* ─── Search with accumulation ─────────────── */
@@ -55,7 +53,6 @@ export class JobService {
         const raw = await provider.fetch(query);
         all.push(...raw);
       } catch (err: any) {
-        console.warn(`[JobService] Provider "${provider.name}" failed:`, err.message);
         errors.push(`${provider.name}: ${err.message}`);
       }
     }
@@ -70,14 +67,12 @@ export class JobService {
     const active = all.filter(j => !this.isExpired(j) && !this.isTooOld(j));
     const enriched = this.enrichJobs(active);
 
-    // Relevance filter: show jobs whose title/description mention at least one query term
+    // Relevance filter: keep jobs where at least one query term (length > 2) appears in title or company name
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     if (terms.length > 0) {
-      const matching = enriched.filter(j => {
-        const text = `${j.title} ${j.description} ${j.companyName}`.toLowerCase();
-        return terms.some(t => text.includes(t));
-      });
-      // If we have matching results, use those; otherwise fall back to all results
+      const matching = enriched.filter(j =>
+        terms.some(t => j.title.toLowerCase().includes(t) || j.companyName.toLowerCase().includes(t))
+      );
       if (matching.length > 0) return this.sortJobs(matching, 'date');
     }
 
@@ -111,40 +106,44 @@ export class JobService {
     }
   }
 
-  /* ─── Provider: Himalayas ──────────────────── */
+  /* ─── Provider: Jobicy ─────────────────────── */
 
-  private async fetchHimalayasBrowse(): Promise<Job[]> {
-    const res = await this.fetchWithTimeout('https://himalayas.app/jobs/api');
-    if (!res.ok) throw new Error(`Himalayas browse API returned ${res.status}`);
+  private async fetchJobicy(query: string): Promise<Job[]> {
+    let url = 'https://jobicy.com/api/v2/remote-jobs?count=20';
+    if (query) {
+      url += `&tag=${encodeURIComponent(query)}`;
+    }
+    const res = await this.fetchWithTimeout(url);
+    if (!res.ok) throw new Error(`Jobicy API returned ${res.status}`);
     const data = await res.json();
-    return (data.jobs || []).map((j: any) => this.normalizeHimalayas(j));
+    if (!data.success) throw new Error('Jobicy API returned error');
+    return (data.jobs || []).map((j: any) => this.normalizeJobicy(j));
   }
 
-  private async fetchHimalayas(query: string): Promise<Job[]> {
-    const params = new URLSearchParams({ q: query, sort: 'recent', page: '1' });
-    const res = await this.fetchWithTimeout(`https://himalayas.app/jobs/api/search?${params}`);
-    if (!res.ok) throw new Error(`Himalayas API returned ${res.status}`);
-    const data = await res.json();
-    return (data.jobs || []).map((j: any) => this.normalizeHimalayas(j));
-  }
-
-  private normalizeHimalayas(j: any): Job {
+  private normalizeJobicy(j: any): Job {
     if (!j) j = {};
-    return this.makeJob({
-      title: j.title,
-      companyName: j.companyName,
-      applicationLink: j.applicationLink,
-      pubDate: j.pubDate,
-      expiryDate: j.expiryDate,
-      minSalary: j.minSalary,
-      maxSalary: j.maxSalary,
-      currency: j.currency,
-      locationRestrictions: Array.isArray(j.locationRestrictions) ? j.locationRestrictions : [],
-      description: j.description,
-      employmentType: j.employmentType,
-      companyLogo: j.companyLogo,
-      _provider: 'himalayas',
+    let pubDate: number | null = null;
+    if (j.pubDate) pubDate = Math.floor(new Date(j.pubDate).getTime() / 1000);
+    const job = this.makeJob({
+      title: j.jobTitle || 'Untitled',
+      companyName: j.companyName || 'Unknown',
+      applicationLink: j.url || null,
+      pubDate,
+      expiryDate: null,
+      minSalary: j.salaryMin || null,
+      maxSalary: j.salaryMax || null,
+      currency: j.salaryCurrency || null,
+      locationRestrictions: j.jobGeo ? [String(j.jobGeo)] : ['Remote'],
+      description: j.jobDescription || j.jobExcerpt || '',
+      employmentType: j.jobType || null,
+      companyLogo: j.companyLogo || null,
+      _provider: 'jobicy',
     });
+    // Map salaryPeriod
+    if (j.salaryPeriod && !job.minSalary && !job.maxSalary) {
+      job._salary = j.salaryPeriod;
+    }
+    return job;
   }
 
   /* ─── Provider: Remotive ───────────────────── */
@@ -175,7 +174,7 @@ export class JobService {
       locationRestrictions: location,
       description: j.description,
       employmentType: j.job_type ? String(j.job_type).replace(/_/g, ' ') : null,
-      companyLogo: j.company_logo,
+      companyLogo: j.company_logo_url || j.company_logo,
       _provider: 'remotive',
     });
   }
@@ -188,7 +187,9 @@ export class JobService {
     if (!res.ok) throw new Error(`RemoteOK API returned ${res.status}`);
     const data = await res.json();
     if (!Array.isArray(data)) return [];
-    return data.filter((j: any) => j && j.id && j.position).map((j: any) => this.normalizeRemoteOK(j));
+    // First entry is usually metadata
+    const jobs = data[0] && data[0].id === undefined ? data.slice(1) : data;
+    return jobs.filter((j: any) => j && j.id && j.position).map((j: any) => this.normalizeRemoteOK(j));
   }
 
   private normalizeRemoteOK(j: any): Job {
@@ -203,7 +204,8 @@ export class JobService {
       minSalary: null, maxSalary: null, currency: null,
       locationRestrictions: j.location ? [String(j.location)] : ['Remote'],
       description: j.description,
-      employmentType: null, companyLogo: j.company_logo,
+      employmentType: null,
+      companyLogo: j.company_logo,
       _provider: 'remoteok',
     });
   }

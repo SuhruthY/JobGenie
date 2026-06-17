@@ -121,7 +121,7 @@ import { Job } from '../job.interface';
       text-transform: uppercase; letter-spacing: 0.5px;
       background: #E2E8F0; color: #94A3B8;
     }
-    .job-card[data-provider="himalayas"] .job-card__source-badge { background: #EEF2FF; color: #4F46E5; }
+    .job-card[data-provider="jobicy"] .job-card__source-badge { background: #ECFEFF; color: #0891B2; }
     .job-card[data-provider="remotive"] .job-card__source-badge { background: #F0FDF4; color: #16A34A; }
     .job-card[data-provider="remoteok"] .job-card__source-badge { background: #FFF7ED; color: #EA580C; }
   `]
