@@ -24,6 +24,7 @@
   const resultsSection = document.getElementById('resultsSection');
   const resultsGrid = document.getElementById('resultsGrid');
   const resultsCount = document.getElementById('resultsCount');
+  const resultsSources = document.getElementById('resultsSources');
   const sortSelect = document.getElementById('sortSelect');
 
   const emptySection = document.getElementById('emptySection');
@@ -105,17 +106,21 @@
     ).join('');
 
     keywordsCount.textContent = `${keywords.length} keywords`;
+    searchBtn.classList.add('keywords__search-btn--pulse');
     show(keywordsSection);
   }
 
   /* ─── Search for Jobs ────────────────────────────── */
   async function performSearch() {
     if (state.isSearching) return;
-    if (!state.extractedKeywords || state.extractedKeywords.all.length === 0) {
+    if (!state.extractedKeywords || !state.extractedKeywords.all || state.extractedKeywords.all.length === 0) {
+      console.warn('[Search] No extracted keywords to search with.');
+      fileHint.textContent = 'Upload a resume first to extract keywords.';
       return;
     }
 
     state.isSearching = true;
+    searchBtn.classList.remove('keywords__search-btn--pulse');
     const query = state.extractedKeywords.searchQuery;
     state.currentQuery = query;
 
@@ -131,7 +136,7 @@
     hide(emptySection);
     hide(errorSection);
     loadingText.textContent = `Searching for jobs matching: "${query}"`;
-    loadingProgress.textContent = 'Contacting Himalayas job search…';
+    loadingProgress.textContent = 'Searching Himalayas…';
     show(loadingSection);
 
     // Scroll to loading so user sees progress
@@ -140,8 +145,8 @@
     try {
       // Progress updates so user knows it's still working
       const progressTimers = [
-        setTimeout(() => { if (state.isSearching) loadingProgress.textContent = 'Receiving results…'; }, 4000),
-        setTimeout(() => { if (state.isSearching) { loadingProgress.textContent = 'Still waiting — job boards can be slow…'; } }, 10000),
+        setTimeout(() => { if (state.isSearching) loadingProgress.textContent = 'Still searching — trying alternative sources…'; }, 5000),
+        setTimeout(() => { if (state.isSearching) loadingProgress.textContent = 'Hang tight — job boards can be slow…'; }, 12000),
       ];
 
       const jobs = await Search.searchJobs(query);
@@ -201,7 +206,11 @@
     // Apply sorting if specified
     const sorted = sortBy ? Search.sortJobs(jobs, sortBy) : jobs;
 
+    const providerCounts = {};
+    sorted.forEach(j => { const p = j._provider || 'unknown'; providerCounts[p] = (providerCounts[p] || 0) + 1; });
+    const sourceParts = Object.entries(providerCounts).map(([p, c]) => `${c} ${p}`);
     resultsCount.textContent = sorted.length;
+    resultsSources.textContent = sourceParts.length ? `(${sourceParts.join(', ')})` : '';
 
     resultsGrid.innerHTML = sorted.map(job => {
       // Build location string
@@ -223,8 +232,11 @@
       // Company initial for logo fallback
       const companyInitial = (job.companyName || '?').charAt(0).toUpperCase();
 
+      // Provider source badge
+      const sourceName = job._provider || 'himalayas';
+
       return `
-        <div class="job-card">
+        <div class="job-card" data-provider="${sourceName}">
           <div class="job-card__header">
             <div class="job-card__info">
               <div class="job-card__title">${escapeHtml(job.title || 'Untitled')}</div>
@@ -250,6 +262,7 @@
               ${escapeHtml(job._salary)}
             </span>` : ''}
             <span class="job-card__expiry-badge ${badgeClass}">${badgeText}</span>
+            <span class="job-card__source-badge">${sourceName}</span>
           </div>
 
           <div class="job-card__snippet">${escapeHtml(job._snippet || 'No description available.')}</div>
@@ -285,6 +298,11 @@
       handleFile(fileInput.files[0]);
     }
   });
+
+  // Prevent double-open: the <label for="fileInput"> natively opens the file dialog,
+  // and the click would then bubble to dropZone and call fileInput.click() again.
+  // Stopping propagation on the label prevents the second open.
+  document.querySelector('.upload__btn').addEventListener('click', e => e.stopPropagation());
 
   // Drag and drop events
   dropZone.addEventListener('click', () => fileInput.click());
